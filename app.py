@@ -1,143 +1,83 @@
-import streamlit as st
-import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.drawing.image import Image
 from io import BytesIO
 
-st.set_page_config(page_title="MCF Admission Auditor", layout="wide")
+def create_formatted_excel_with_logo(df):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Admission Report"
 
-st.title("📊 MCF Admission Analyzer + Audit System")
-
-uploaded_file = st.file_uploader("📂 Upload Admission File", type=["xlsx"])
-
-if uploaded_file is not None:
+    # -------- ADD LOGO --------
     try:
-        df_raw = pd.read_excel(uploaded_file)
-        df_raw.columns = df_raw.columns.astype(str).str.strip()
+        logo = Image("logo.png")  # keep logo in same folder
+        logo.height = 60
+        logo.width = 120
+        ws.add_image(logo, "A1")
+    except:
+        pass  # if logo missing, skip
 
-        st.subheader("🔍 Raw Data Preview")
-        st.dataframe(df_raw)
+    # -------- ADD TITLE --------
+    title = "MCF Summer Camp Admission 2026"
 
-        # -------- FIND COLUMNS --------
-        def find_col(keys):
-            for col in df_raw.columns:
-                for k in keys:
-                    if k in col.lower():
-                        return col
-            return None
+    ws.merge_cells(start_row=1, start_column=2, end_row=2, end_column=len(df.columns))
+    title_cell = ws.cell(row=1, column=2, value=title)
 
-        emp_col = find_col(["employee", "staff", "counsellor"])
-        camp_col = find_col(["camp"])
+    title_cell.font = Font(size=16, bold=True)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-        if emp_col is None or camp_col is None:
-            st.error("❌ Required columns not found")
-            st.stop()
+    # -------- STYLES --------
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    bold_font = Font(bold=True)
+    center_align = Alignment(horizontal="center", vertical="center")
 
-        df = df_raw[[emp_col, camp_col]].copy()
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
 
-        # -------- CLEAN EMPLOYEE --------
-        df[emp_col] = (
-            df[emp_col]
-            .astype(str)
-            .str.strip()
-            .str.upper()
-        )
+    start_row = 4  # data starts from row 4
 
-        # -------- CLEAN CAMP --------
-        df[camp_col] = (
-            df[camp_col]
-            .astype(str)
-            .str.strip()
-            .str.replace(r"\s+", " ", regex=True)
-        )
+    # -------- HEADER --------
+    for col_num, col_name in enumerate(df.columns, 1):
+        cell = ws.cell(row=start_row, column=col_num, value=col_name)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_align
+        cell.border = border
 
-        # -------- STANDARD CAMP MAP --------
-        camp_map = {
-            "MCF SUMMER BOOT CAMP- 45 DAY'S": "MCF SUMMER BOOT CAMP- 45 DAY'S",
-            "ADVANCE ADVENTURE CAMP - 10 DAY'S": "ADVANCE ADVENTURE CAMP - 10 DAY'S",
-            "ADVENTURE TRAINING CAMP - 7 DAY'S": "ADVENTURE TRAINING CAMP - 7 DAY'S",
-            "COMMANDO TRANING CAMP -15 DAY'S": "COMMANDO TRANING CAMP -15 DAY'S",
-            "COMMANDO TRANING CAMP -15  DAY'S": "COMMANDO TRANING CAMP -15 DAY'S",
-            "SUMMER MILITARY TRAINING CAMP - 30 DAY'S": "SUMMER MILITARY TRAINING CAMP - 30 DAY'S",
-            "BASIC ADVENTURE CAMP - 5 DAY'S": "BASIC ADVENTURE CAMP - 5 DAY'S",
-            "BASIC ADVENTURE  CAMP - 5 DAY'S": "BASIC ADVENTURE CAMP - 5 DAY'S",
-            "PERSONALITY DEVELOPMENT CAMP - 21 DAY'S": "PERSONALITY DEVELOPMENT CAMP - 21 DAY'S"
-        }
+    # -------- DATA --------
+    for row_num, row in enumerate(df.values, start_row + 1):
+        for col_num, value in enumerate(row, 1):
+            cell = ws.cell(row=row_num, column=col_num, value=value)
+            cell.alignment = center_align
+            cell.border = border
 
-        df["Original Camp"] = df[camp_col]
-        df[camp_col] = df[camp_col].replace(camp_map)
+            if str(row[0]).strip().upper() == "TOTAL":
+                cell.font = bold_font
+                cell.fill = PatternFill(start_color="D9D9D9", fill_type="solid")
 
-        # -------- AUDIT REPORT --------
-        st.subheader("🧾 Audit Report")
+    # -------- FREEZE HEADER --------
+    ws.freeze_panes = f"A{start_row+1}"
 
-        # Unknown camps
-        unknown_camps = df[~df[camp_col].isin(camp_map.values())]
-        st.write("❗ Unknown / Incorrect Camp Names:", unknown_camps.shape[0])
-        if not unknown_camps.empty:
-            st.dataframe(unknown_camps.head(10))
+    # -------- AUTO WIDTH --------
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
 
-        # Blank employees
-        blank_emp = df[df[emp_col] == ""]
-        st.write("❗ Blank Employee Names:", blank_emp.shape[0])
+        for cell in col:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
 
-        # Total rows
-        st.write(f"📊 Total Input Rows: {len(df)}")
+        ws.column_dimensions[col_letter].width = max_length + 3
 
-        # -------- FINAL CAMP ORDER --------
-        camp_order = list(set(camp_map.values()))
-
-        # -------- PIVOT --------
-        pivot = pd.pivot_table(
-            df,
-            index=emp_col,
-            columns=camp_col,
-            aggfunc="size",
-            fill_value=0
-        )
-
-        for camp in camp_order:
-            if camp not in pivot.columns:
-                pivot[camp] = 0
-
-        pivot = pivot[camp_order]
-        pivot = pivot.reset_index()
-        pivot.rename(columns={emp_col: "Employee Name"}, inplace=True)
-
-        # -------- TOTAL --------
-        pivot["Total"] = pivot[camp_order].sum(axis=1)
-
-        total_row = pd.DataFrame(pivot[camp_order + ["Total"]].sum()).T
-        total_row.insert(0, "Employee Name", "Total")
-
-        final_df = pd.concat([pivot, total_row], ignore_index=True)
-
-        # -------- VALIDATION --------
-        output_total = int(final_df.iloc[-1]["Total"])
-        st.write(f"📊 Output Total Count: {output_total}")
-
-        if output_total != len(df):
-            st.error("❌ Mismatch detected between input rows and output count")
-        else:
-            st.success("✅ Perfect Match: No data loss")
-
-        # -------- DISPLAY --------
-        st.subheader("📋 Final Clean Report")
-        st.dataframe(final_df, use_container_width=True)
-
-        # -------- DOWNLOAD --------
-        def to_excel(df):
-            output = BytesIO()
-            df.to_excel(output, index=False)
-            return output.getvalue()
-
-        st.download_button(
-            "📥 Download Final Excel",
-            data=to_excel(final_df),
-            file_name="MCF_Audit_Final.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-    except Exception as e:
-        st.error("❌ Error occurred")
-        st.exception(e)
-
-else:
-    st.info("👆 Upload file to start audit")
+    # -------- SAVE --------
+    output = BytesIO()
+    wb.save(output)
+    return output.getvalue()
