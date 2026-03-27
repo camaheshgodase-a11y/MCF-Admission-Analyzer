@@ -8,17 +8,32 @@ uploaded_file = st.file_uploader("Upload Admission Excel File", type=["xlsx"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
-    # SHOW COLUMN NAMES (IMPORTANT)
     st.write("Columns in your file:", df.columns.tolist())
 
-    # SIMPLE AUTO ANALYSIS (NO ERROR)
-    st.subheader("Total Admissions")
-    st.write(len(df))
+    # Select columns manually after seeing names
+    employee_col = st.selectbox("Select Employee Column", df.columns)
+    camp_col = st.selectbox("Select Camp Column", df.columns)
 
-    st.subheader("Employee Wise Admissions")
-    emp = df.groupby(df.columns[0]).size().reset_index(name="Admissions")
-    st.dataframe(emp)
+    # Pivot Table
+    pivot_table = pd.pivot_table(
+        df,
+        index=camp_col,
+        columns=employee_col,
+        aggfunc='size',
+        fill_value=0
+    )
 
-    st.subheader("Camp Wise Admissions")
-    camp = df.groupby(df.columns[1]).size().reset_index(name="Admissions")
-    st.dataframe(camp)
+    st.subheader("Camp vs Employee Admission Count")
+    st.dataframe(pivot_table)
+
+    # Download Excel
+    output_file = "Admission_Pivot.xlsx"
+    pivot_table.to_excel(output_file)
+
+    with open(output_file, "rb") as file:
+        st.download_button(
+            label="Download Pivot Excel",
+            data=file,
+            file_name="Admission_Pivot.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
