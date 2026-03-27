@@ -18,20 +18,22 @@ if uploaded_file:
     fees_col = st.selectbox("Select Fees Column", df.columns)
     balance_col = st.selectbox("Select Balance Column", df.columns)
 
-    # Clean data
+    # Clean text columns
     df[employee_col] = df[employee_col].astype(str).str.strip()
     df[camp_col] = df[camp_col].astype(str).str.strip()
 
-    # Convert Date
+    # Convert Date safely
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-    df = df.dropna(subset=[date_col])
 
-    # Convert Fees & Balance
+    # Drop rows where date is blank
+    df = df[df[date_col].notna()]
+
+    # Convert Fees & Balance to numbers
     df[fees_col] = pd.to_numeric(df[fees_col], errors='coerce').fillna(0)
     df[balance_col] = pd.to_numeric(df[balance_col], errors='coerce').fillna(0)
 
-    # Create Month
-    df['Month'] = df[date_col].dt.to_period('M').astype(str)
+    # Create Month column safely
+    df['Month'] = df[date_col].apply(lambda x: x.strftime('%Y-%m'))
 
     # Pivot Table
     pivot_table = pd.pivot_table(
