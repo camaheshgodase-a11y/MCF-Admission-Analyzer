@@ -1,44 +1,24 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 
-st.set_page_config(layout="wide")
-st.title("MCF Admission MIS Dashboard")
+st.title("MCF Admission Analyzer")
 
 uploaded_file = st.file_uploader("Upload Admission Excel File", type=["xlsx"])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
-    employee_col = 'Employee Name'
-    camp_col = 'Camp Name'
-    date_col = 'Admission Date'
+    # SHOW COLUMN NAMES (IMPORTANT)
+    st.write("Columns in your file:", df.columns.tolist())
 
-    df[date_col] = pd.to_datetime(df[date_col])
+    # SIMPLE AUTO ANALYSIS (NO ERROR)
+    st.subheader("Total Admissions")
+    st.write(len(df))
 
-    total_admission = len(df)
-    today_admission = len(df[df[date_col] == df[date_col].max()])
-    month_admission = len(df[df[date_col].dt.month == df[date_col].dt.month.max()])
+    st.subheader("Employee Wise Admissions")
+    emp = df.groupby(df.columns[0]).size().reset_index(name="Admissions")
+    st.dataframe(emp)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Admissions", total_admission)
-    col2.metric("Admissions Today", today_admission)
-    col3.metric("Admissions This Month", month_admission)
-
-    emp_summary = df.groupby(employee_col).size().reset_index(name='Admissions')
-    camp_summary = df.groupby(camp_col).size().reset_index(name='Admissions')
-
-    st.subheader("Employee Performance")
-    st.dataframe(emp_summary)
-
-    st.subheader("Camp Performance")
-    st.dataframe(camp_summary)
-
-    df['Month'] = df[date_col].dt.to_period('M')
-    month_summary = df.groupby('Month').size().reset_index(name='Admissions')
-
-    st.subheader("Monthly Trend")
-    plt.figure()
-    plt.plot(month_summary['Month'].astype(str), month_summary['Admissions'])
-    plt.xticks(rotation=45)
-    st.pyplot(plt)
+    st.subheader("Camp Wise Admissions")
+    camp = df.groupby(df.columns[1]).size().reset_index(name="Admissions")
+    st.dataframe(camp)
