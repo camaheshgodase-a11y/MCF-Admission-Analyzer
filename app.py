@@ -2,113 +2,105 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
-# ------------------ PAGE CONFIG ------------------
 st.set_page_config(page_title="MCF Admission Analyzer", layout="wide")
 
-st.title("📊 MCF Admission Analyzer")
-st.write("Upload your MCF Admission Template Excel file to generate Admission Format.")
+st.title("📊 MCF Summer Camp Admission 2026")
 
-# ------------------ FILE UPLOAD ------------------
-uploaded_file = st.file_uploader("📂 Upload Excel File", type=["xlsx"])
+uploaded_file = st.file_uploader("📂 Upload Admission Template", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
-        # ------------------ READ FILE ------------------
+        # ---------------- READ FILE ----------------
         df = pd.read_excel(uploaded_file)
         df.columns = df.columns.astype(str).str.strip()
 
-        st.subheader("🔍 Raw Data Preview")
+        st.subheader("🔍 Raw Data")
         st.dataframe(df)
 
-        # ------------------ VALIDATION ------------------
-        if df.empty:
-            st.warning("⚠️ Uploaded file is empty")
-            st.stop()
-
-        # ------------------ AUTO COLUMN DETECTION ------------------
-        def find_column(keywords):
+        # ---------------- COLUMN DETECTION ----------------
+        def find_col(keywords):
             for col in df.columns:
                 for k in keywords:
                     if k in col.lower():
                         return col
             return None
 
-        name_col = find_column(["name", "student"])
-        camp_col = find_column(["camp", "days", "duration"])
-        fees_col = find_column(["fee", "amount", "paid"])
+        name_col = find_col(["name", "employee", "student"])
+        camp_col = find_col(["camp", "program", "course"])
 
-        # ------------------ FALLBACK (NO CRASH) ------------------
         if name_col is None:
             name_col = df.columns[0]
-
         if camp_col is None:
             camp_col = df.columns[1]
 
-        if fees_col is None:
-            fees_col = df.columns[-1]
-
-        st.write("✅ Detected Columns:")
-        st.write(f"Name: {name_col}")
-        st.write(f"Camp: {camp_col}")
-        st.write(f"Fees: {fees_col}")
-
-        # ------------------ CLEAN DATA ------------------
-        df = df[[name_col, camp_col, fees_col]].copy()
-
-        df[fees_col] = pd.to_numeric(df[fees_col], errors='coerce').fillna(0)
-        df[name_col] = df[name_col].astype(str).str.strip()
+        # ---------------- CLEAN DATA ----------------
+        df = df[[name_col, camp_col]].copy()
+        df[name_col] = df[name_col].astype(str).str.strip().str.upper()
         df[camp_col] = df[camp_col].astype(str).str.strip()
 
-        df = df.dropna(subset=[name_col])
+        # ---------------- FIXED CAMP ORDER ----------------
+        camp_order = [
+            "MCF SUMMER BOOT CAMP- 45 DAY'S",
+            "ADVANCE ADVENTURE CAMP - 10 DAY'S",
+            "ADVENTURE TRAINING CAMP - 7 DAY'S",
+            "COMMANDO TRANING CAMP -15  DAY'S",
+            "SUMMER MILITARY TRAINING CAMP - 30 DAY'S",
+            "BASIC ADVENTURE  CAMP - 5 DAY'S",
+            "PERSONALITY DEVELOPMENT CAMP - 21 DAY'S",
+            "COMMANDO TRANING CAMP -15 DAY'S"
+        ]
 
-        # ------------------ CREATE ADMISSION FORMAT ------------------
-        pivot_df = pd.pivot_table(
+        # ---------------- CREATE PIVOT (COUNT) ----------------
+        pivot = pd.pivot_table(
             df,
             index=name_col,
             columns=camp_col,
-            values=fees_col,
-            aggfunc='sum',
+            aggfunc='size',
             fill_value=0
         )
 
-        pivot_df = pivot_df.reset_index()
+        # ---------------- ENSURE ALL COLUMNS EXIST ----------------
+        for camp in camp_order:
+            if camp not in pivot.columns:
+                pivot[camp] = 0
 
-        # ------------------ ADD TOTAL COLUMN ------------------
-        numeric_cols = pivot_df.select_dtypes(include='number').columns
-        pivot_df["Total Fees"] = pivot_df[numeric_cols].sum(axis=1)
+        pivot = pivot[camp_order]  # reorder columns
+        pivot = pivot.reset_index()
 
-        pivot_df.rename(columns={name_col: "Student Name"}, inplace=True)
+        pivot.rename(columns={name_col: "Employee Name"}, inplace=True)
 
-        st.subheader("📊 Admission Format Output")
-        st.dataframe(pivot_df)
+        # ---------------- ADD ROW TOTAL ----------------
+        pivot["Total"] = pivot[camp_order].sum(axis=1)
 
-        # ------------------ CAMP SUMMARY ------------------
-        camp_summary = df.groupby(camp_col)[fees_col].sum().reset_index()
-        camp_summary.columns = ["Camp", "Total Fees"]
+        # ---------------- ADD GRAND TOTAL ROW ----------------
+        total_row = pd.DataFrame(pivot[camp_order + ["Total"]].sum()).T
+        total_row.insert(0, "Employee Name", "Total")
 
-        st.subheader("🏕️ Camp Summary")
-        st.dataframe(camp_summary)
+        final_df = pd.concat([pivot, total_row], ignore_index=True)
 
-        # ------------------ DOWNLOAD EXCEL ------------------
-        def convert_to_excel(df1, df2):
+        # ---------------- DISPLAY ----------------
+        st.subheader("📊 Final Output")
+        st.dataframe(final_df)
+
+        # ---------------- DOWNLOAD ----------------
+        def to_excel(df):
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df1.to_excel(writer, index=False, sheet_name='Admission Format')
-                df2.to_excel(writer, index=False, sheet_name='Camp Summary')
+                df.to_excel(writer, index=False, sheet_name='Admission Report')
             return output.getvalue()
 
-        excel_file = convert_to_excel(pivot_df, camp_summary)
+        excel_file = to_excel(final_df)
 
         st.download_button(
-            label="📥 Download Admission Format Excel",
+            "📥 Download Excel",
             data=excel_file,
-            file_name="Admission_Format_Output.xlsx",
+            file_name="MCF_Summer_Camp_Admission_2026.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
     except Exception as e:
-        st.error("❌ Error occurred while processing file")
+        st.error("❌ Error occurred")
         st.exception(e)
 
 else:
-    st.info("👆 Please upload an Excel file to start analysis.")
+    st.info("👆 Upload your file to generate report")
