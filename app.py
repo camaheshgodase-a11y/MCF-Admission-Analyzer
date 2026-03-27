@@ -97,12 +97,7 @@ if uploaded_file is not None:
             header_font = Font(bold=True, color="FFFFFF")
             center = Alignment(horizontal="center", vertical="center")
 
-            thin = Border(
-                left=Side(style="thin"), right=Side(style="thin"),
-                top=Side(style="thin"), bottom=Side(style="thin")
-            )
-
-            # ===== MAIN REPORT =====
+            # ===== SHEET 1: MAIN REPORT =====
             ws = wb.active
             ws.title = "Admission Report"
 
@@ -121,37 +116,80 @@ if uploaded_file is not None:
                 cell.fill = header_fill
                 cell.font = header_font
                 cell.alignment = center
-                cell.border = thin
 
             for r, row in enumerate(df.values, start_row + 1):
                 ws.append(list(row))
-                for c in range(1, len(df.columns)+1):
-                    ws.cell(row=r, column=c).border = thin
 
-            # Highlight total
-            for c in range(1, len(df.columns)+1):
-                ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
-
-            ws.freeze_panes = "A5"
             auto_width(ws)
 
-            # ===== DASHBOARD =====
+            # ===== SHEET 2: DASHBOARD =====
             ws2 = wb.create_sheet("Dashboard")
 
-            total_adm = df.iloc[-1]["Total"]
-            ws2.append(["Total Admissions", total_adm])
+            chart1 = BarChart()
+            chart1.title = "Employee-wise Admissions"
 
-            chart = BarChart()
-            data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=ws.max_row)
-            cats = Reference(ws, min_col=1, min_row=5, max_row=ws.max_row-1)
+            data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=len(df)+3)
+            cats = Reference(ws, min_col=1, min_row=5, max_row=len(df)+2)
 
-            chart.add_data(data, titles_from_data=True)
-            chart.set_categories(cats)
-            ws2.add_chart(chart, "A5")
+            chart1.add_data(data, titles_from_data=True)
+            chart1.set_categories(cats)
 
-            auto_width(ws2)
+            ws2.add_chart(chart1, "A1")
 
-            # ===== FEES COLLECTION WITH BALANCE =====
+            # ===== SHEET 3: CAMP ANALYSIS =====
+            ws3 = wb.create_sheet("Camp Analysis")
+            ws3.append(["Camp", "Total", "%"])
+
+            total = df.iloc[-1]["Total"]
+
+            for col in df.columns[1:-1]:
+                val = df.iloc[-1][col]
+                percent = (val/total) if total else 0
+                ws3.append([col, val, percent])
+
+            # % format
+            for row in ws3.iter_rows(min_row=2, min_col=3, max_col=3):
+                for cell in row:
+                    cell.number_format = '0.00%'
+
+            auto_width(ws3)
+
+            # ===== SHEET 4: TOP PERFORMERS =====
+            ws4 = wb.create_sheet("Top Performers")
+
+            temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
+            ws4.append(["Rank", "Employee", "Total"])
+
+            for i, row in enumerate(temp.values, 1):
+                ws4.append([i, row[0], row[-1]])
+
+            auto_width(ws4)
+
+            # ===== SHEET 5: AUDIT =====
+            ws5 = wb.create_sheet("Audit Summary")
+            ws5.append(["Metric", "Value"])
+            ws5.append(["Total Records", len(raw_df)])
+            ws5.append(["Final Count", df.iloc[-1]["Total"]])
+            ws5.append(["Difference", len(raw_df) - df.iloc[-1]["Total"]])
+
+            auto_width(ws5)
+
+            # ===== SHEET 6: RAW DATA =====
+            ws6 = wb.create_sheet("Raw Data")
+            ws6.append(list(raw_df.columns) + ["Status"])
+
+            for row in raw_df.values:
+                row_list = list(row)
+                status = "Incomplete" if any(pd.isna(x) or str(x).strip()=="" for x in row_list) else "Complete"
+                ws6.append(row_list + [status])
+
+                fill = PatternFill(start_color="FFC7CE" if status=="Incomplete" else "C6EFCE", fill_type="solid")
+                for cell in ws6[ws6.max_row]:
+                    cell.fill = fill
+
+            auto_width(ws6)
+
+            # ===== SHEET 7: FEES COLLECTION (WITH BALANCE) =====
             ws7 = wb.create_sheet("Fees Collection")
 
             fee_col = None
@@ -164,7 +202,6 @@ if uploaded_file is not None:
             if fee_col:
                 temp_fee = raw_df.copy()
                 temp_fee[fee_col] = pd.to_numeric(temp_fee[fee_col], errors="coerce").fillna(0)
-
                 summary = temp_fee.groupby(emp_col)[fee_col].sum().reset_index()
 
                 ws7.append(["Employee", "Collected", "Expected", "Balance"])
@@ -181,14 +218,16 @@ if uploaded_file is not None:
 
                     ws7.append([name, collected, expected, balance])
 
+            else:
+                ws7.append(["No Fees Column Found"])
+
             auto_width(ws7)
 
-            # ===== FEES ANALYSIS + PIE =====
+            # ===== SHEET 8: FEES ANALYSIS + PIE =====
             ws8 = wb.create_sheet("Fees Analysis")
 
             if fee_col:
                 summary = temp_fee.groupby(camp_col)[fee_col].sum().reset_index()
-                total_fee = summary[fee_col].sum()
 
                 ws8.append(["Camp", "Fees"])
 
@@ -204,16 +243,10 @@ if uploaded_file is not None:
 
                 ws8.add_chart(pie, "E2")
 
+            else:
+                ws8.append(["No Fees Column Found"])
+
             auto_width(ws8)
-
-            # ===== STUDENT AUDIT =====
-            ws9 = wb.create_sheet("Student Audit")
-            ws9.append(list(raw_df.columns))
-
-            for row in raw_df.values:
-                ws9.append(list(row))
-
-            auto_width(ws9)
 
             output = BytesIO()
             wb.save(output)
