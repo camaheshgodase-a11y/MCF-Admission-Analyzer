@@ -3,12 +3,13 @@ import pandas as pd
 from io import BytesIO
 
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, NamedStyle
 from openpyxl.chart import BarChart, Reference, PieChart
+from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.series import DataPoint
 from openpyxl.utils import get_column_letter
 
-st.set_page_config(page_title="MCF Admission Auditor", layout="wide")
+st.set_page_config(page_title="MCF Admission Auditor + Premium MIS", layout="wide")
 
 st.title("📊 MCF Admission Analyzer + Audit System")
 st.caption("Created by CA Mahesh Godase")
@@ -52,21 +53,22 @@ if uploaded_file is not None:
         st.subheader("📋 Final Report")
         st.dataframe(final_df, use_container_width=True)
 
+        # ===== Styles =====
+        thin = Border(left=Side(style="thin"), right=Side(style="thin"),
+                      top=Side(style="thin"), bottom=Side(style="thin"))
+        center = Alignment(horizontal="center", vertical="center")
+        bold_font = Font(bold=True)
+        header_fill = PatternFill(start_color="1F4E78", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        title_font = Font(size=16, bold=True)
+
         def auto_width(ws):
             for col_cells in ws.iter_cols():
                 max_len = max((len(str(c.value)) for c in col_cells if c.value), default=0)
                 ws.column_dimensions[get_column_letter(col_cells[0].column)].width = max_len + 3
 
         def to_excel(df, raw_df):
-
             wb = Workbook()
-            header_fill = PatternFill(start_color="1F4E78", fill_type="solid")
-            header_font = Font(bold=True, color="FFFFFF")
-            title_font = Font(size=16, bold=True)
-            bold_font = Font(bold=True)
-            thin = Border(left=Side(style="thin"), right=Side(style="thin"),
-                          top=Side(style="thin"), bottom=Side(style="thin"))
-            center = Alignment(horizontal="center", vertical="center")
 
             # ===== ADMISSION REPORT =====
             ws = wb.active
@@ -75,6 +77,7 @@ if uploaded_file is not None:
             ws.cell(1, 1).value = "MCF Admission MIS Report"
             ws.cell(1, 1).font = title_font
             ws.cell(1, 1).alignment = center
+
             start_row = 4
             for col_num, col_name in enumerate(df.columns, 1):
                 cell = ws.cell(row=start_row, column=col_num, value=col_name)
@@ -82,15 +85,19 @@ if uploaded_file is not None:
                 cell.font = header_font
                 cell.alignment = center
                 cell.border = thin
+
             for r, row in enumerate(df.values, start_row + 1):
                 ws.append(list(row))
                 for c in range(1, len(df.columns)+1):
-                    ws.cell(row=r, column=c).border = thin
-                    ws.cell(row=r, column=c).alignment = center
+                    cell = ws.cell(row=r, column=c)
+                    cell.border = thin
+                    cell.alignment = center
+
             for c in range(1, len(df.columns)+1):
                 cell = ws.cell(row=ws.max_row, column=c)
                 cell.font = bold_font
                 cell.fill = PatternFill(start_color="D9E1F2", fill_type="solid")
+
             ws.freeze_panes = "A5"
             auto_width(ws)
 
@@ -104,22 +111,33 @@ if uploaded_file is not None:
                 temp_fee = raw_df.copy()
                 temp_fee[fee_col] = pd.to_numeric(temp_fee[fee_col], errors="coerce").fillna(0)
                 summary = temp_fee.groupby(camp_col)[fee_col].sum().reset_index()
-                ws8.append(["Camp", "Fees"])
-                for row in summary.values:
-                    ws8.append([row[0], row[1]])
+                summary["%"] = (summary[fee_col]/summary[fee_col].sum()*100).round(2)
+                summary = summary.sort_values(by=fee_col, ascending=False).reset_index(drop=True)
+                summary["Rank"] = summary.index + 1
+
+                ws8.append(["Rank", "Camp", "Fees", "%"])
+                for col_num in range(1,5):
+                    cell = ws8.cell(row=1, column=col_num)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = center
+
+                for idx, row in summary.iterrows():
+                    ws8.append([row["Rank"], row[camp_col], row[fee_col], f"{row['%']}%"])
+                    for c in range(1,5):
+                        ws8.cell(row=ws8.max_row, column=c).border = thin
+                        ws8.cell(row=ws8.max_row, column=c).alignment = center
+
+                # Pie chart
                 pie = PieChart()
                 pie.title = "Camp-wise Fees Distribution"
-                data = Reference(ws8, min_col=2, min_row=1, max_row=len(summary)+1)
-                labels = Reference(ws8, min_col=1, min_row=2, max_row=len(summary)+1)
+                data = Reference(ws8, min_col=3, min_row=1, max_row=len(summary)+1)
+                labels = Reference(ws8, min_col=2, min_row=2, max_row=len(summary)+1)
                 pie.add_data(data, titles_from_data=True)
                 pie.set_categories(labels)
-                colors = ["FF6384","36A2EB","FFCE56","4BC0C0","9966FF","FF9F40"]
-                pie.series[0].data_points = [DataPoint(idx=i) for i in range(len(summary))]
-                for i, dp in enumerate(pie.series[0].data_points):
-                    dp.graphicalProperties.solidFill = colors[i % len(colors)]
                 pie.width = 12
                 pie.height = 10
-                ws8.add_chart(pie, "E2")
+                ws8.add_chart(pie, "F2")
             else:
                 ws8.append(["No Fees Column Found"])
             auto_width(ws8)
@@ -127,30 +145,37 @@ if uploaded_file is not None:
             # ===== DASHBOARD =====
             ws2 = wb.create_sheet("Dashboard")
             chart = BarChart()
+            chart.title = "Employee-wise Admissions"
             data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=ws.max_row)
             cats = Reference(ws, min_col=1, min_row=5, max_row=ws.max_row-1)
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(cats)
+            chart.dataLabels = DataLabelList()
+            chart.dataLabels.showVal = True
             ws2.add_chart(chart, "A1")
 
-            # ===== IMPROVED CAMP ANALYSIS =====
+            # ===== CAMP ANALYSIS =====
             ws3 = wb.create_sheet("Camp Analysis")
-            # Table headers with colors
             ws3.append(["Rank", "Camp", "Total", "%"])
-            for col_num in range(1, 5):
-                cell = ws3.cell(row=1, column=col_num)
-                cell.font = Font(bold=True, color="FFFFFF")
-                cell.fill = PatternFill(start_color="4F81BD", fill_type="solid")
+            for c in range(1,5):
+                cell = ws3.cell(row=1, column=c)
+                cell.font = header_font
+                cell.fill = header_fill
                 cell.alignment = center
+
             total = df.iloc[-1]["Total"]
             camp_list = df.columns[1:-1]
             camp_totals = [df.iloc[-1][c] for c in camp_list]
-            # Rank camps descending
             camp_ranking = sorted(zip(camp_list, camp_totals), key=lambda x: x[1], reverse=True)
-            for idx, (camp, val) in enumerate(camp_ranking, 1):
-                ws3.append([idx, camp, val, val/total if total else 0])
-            auto_width(ws3)
-            # Pie Chart for Camp Analysis
+
+            for idx, (camp, val) in enumerate(camp_ranking,1):
+                ws3.append([idx, camp, val, f"{(val/total*100):.2f}%"])
+                for c in range(1,5):
+                    cell = ws3.cell(row=ws3.max_row, column=c)
+                    cell.border = thin
+                    cell.alignment = center
+
+            # Pie + Bar chart (medium size)
             pie = PieChart()
             pie.title = "Camp-wise Distribution"
             data = Reference(ws3, min_col=3, min_row=1, max_row=len(camp_ranking)+1)
@@ -160,7 +185,7 @@ if uploaded_file is not None:
             pie.width = 12
             pie.height = 10
             ws3.add_chart(pie, "F2")
-            # Bar Chart for Camp Analysis
+
             bar = BarChart()
             bar.title = "Camp-wise Total"
             bar.add_data(data, titles_from_data=True)
@@ -168,18 +193,36 @@ if uploaded_file is not None:
             bar.width = 16
             bar.height = 10
             ws3.add_chart(bar, "F18")
+            auto_width(ws3)
 
-            # ===== REST SAME =====
+            # ===== TOP PERFORMERS =====
             ws4 = wb.create_sheet("Top Performers")
-            temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
             ws4.append(["Rank", "Employee", "Total"])
-            for i, row in enumerate(temp.values, 1):
+            for c in range(1,4):
+                cell = ws4.cell(row=1, column=c)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center
+            temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
+            for i,row in enumerate(temp.values,1):
                 ws4.append([i, row[0], row[-1]])
+                for c in range(1,4):
+                    ws4.cell(row=ws4.max_row,column=c).border = thin
+                    ws4.cell(row=ws4.max_row,column=c).alignment = center
 
+            # ===== RAW DATA =====
             ws6 = wb.create_sheet("Raw Data")
             ws6.append(list(raw_df.columns))
+            for c in range(1,len(raw_df.columns)+1):
+                cell = ws6.cell(row=1,column=c)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center
             for row in raw_df.fillna("").values:
                 ws6.append(list(row))
+                for c in range(1,len(raw_df.columns)+1):
+                    ws6.cell(row=ws6.max_row,column=c).border = thin
+                    ws6.cell(row=ws6.max_row,column=c).alignment = center
 
             output = BytesIO()
             wb.save(output)
