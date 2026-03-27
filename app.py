@@ -87,10 +87,6 @@ if uploaded_file is not None:
 
         final_df = pd.concat([pivot, total_row], ignore_index=True)
 
-        output_total = int(final_df.iloc[-1]["Total"])
-        st.success(f"✅ Output Total: {output_total}")
-
-        # -------- DISPLAY --------
         st.subheader("📋 Final Report")
         st.dataframe(final_df, use_container_width=True)
 
@@ -98,23 +94,34 @@ if uploaded_file is not None:
         def to_excel(df, raw_df):
             wb = Workbook()
 
+            header_fill = PatternFill(start_color="4F81BD", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+            bold_font = Font(bold=True)
+            center = Alignment(horizontal="center", vertical="center")
+
+            border = Border(left=Side(style='thin'), right=Side(style='thin'),
+                            top=Side(style='thin'), bottom=Side(style='thin'))
+
+            def auto_width(ws):
+                for col in ws.columns:
+                    max_len = 0
+                    col_letter = col[0].column_letter
+                    for cell in col:
+                        if cell.value:
+                            max_len = max(max_len, len(str(cell.value)))
+                    ws.column_dimensions[col_letter].width = max_len + 3
+
             # ===== SHEET 1 =====
             ws = wb.active
             ws.title = "Admission Report"
 
             try:
-                logo = Image("logo.png")
-                ws.add_image(logo, "A1")
+                ws.add_image(Image("logo.png"), "A1")
             except:
                 pass
 
             ws.merge_cells(start_row=1, start_column=2, end_row=2, end_column=len(df.columns))
             ws.cell(row=1, column=2, value="MCF Summer Camp Admission 2026").font = Font(size=16, bold=True)
-
-            header_fill = PatternFill(start_color="4F81BD", fill_type="solid")
-            header_font = Font(bold=True, color="FFFFFF")
-            border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                            top=Side(style='thin'), bottom=Side(style='thin'))
 
             start_row = 4
 
@@ -123,59 +130,41 @@ if uploaded_file is not None:
                 cell.fill = header_fill
                 cell.font = header_font
                 cell.border = border
-                cell.alignment = Alignment(horizontal="center")
+                cell.alignment = center
 
             for r, row in enumerate(df.values, start_row + 1):
                 for c, val in enumerate(row, 1):
                     cell = ws.cell(row=r, column=c, value=val)
                     cell.border = border
-                    cell.alignment = Alignment(horizontal="center")
+                    cell.alignment = center
 
-            # ===== SHEET 2 DASHBOARD =====
-            ws2 = wb.create_sheet("Dashboard")
+                    if str(row[0]).upper() == "TOTAL":
+                        cell.font = bold_font
+                        cell.fill = PatternFill(start_color="D9D9D9", fill_type="solid")
 
-            chart = BarChart()
-            data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=len(df)+3)
-            cats = Reference(ws, min_col=1, min_row=5, max_row=len(df)+2)
-            chart.add_data(data, titles_from_data=True)
-            chart.set_categories(cats)
-            ws2.add_chart(chart, "A1")
+            ws.freeze_panes = "A5"
+            auto_width(ws)
 
-            # ===== SHEET 3 CAMP ANALYSIS =====
-            ws3 = wb.create_sheet("Camp Analysis")
-
-            ws3.append(["Camp", "Total", "%"])
-
-            total = df.iloc[-1]["Total"]
-
-            for col in df.columns[1:-1]:
-                val = df.iloc[-1][col]
-                ws3.append([col, val, round(val/total*100,2)])
-
-            # ===== SHEET 4 TOP PERFORMERS =====
-            ws4 = wb.create_sheet("Top Performers")
-
-            temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
-
-            ws4.append(["Rank", "Employee", "Total"])
-
-            for i, row in enumerate(temp.values, 1):
-                ws4.append([i, row[0], row[-1]])
-
-            # ===== SHEET 5 AUDIT =====
-            ws5 = wb.create_sheet("Audit")
-
-            ws5.append(["Metric", "Value"])
-            ws5.append(["Total Rows", len(raw_df)])
-            ws5.append(["Output Total", df.iloc[-1]["Total"]])
-
-            # ===== SHEET 6 BASE DATA =====
+            # ===== SHEET 6 RAW DATA =====
             ws6 = wb.create_sheet("Raw Data (Input)")
 
-            ws6.append(list(raw_df.columns))
-            for row in raw_df.values:
-                ws6.append(list(row))
+            headers = list(raw_df.columns) + ["Data Status"]
+            ws6.append(headers)
 
+            for row in raw_df.values:
+                row_list = list(row)
+                status = "Incomplete" if any(pd.isna(x) or str(x).strip() == "" for x in row_list) else "Complete"
+                row_list.append(status)
+                ws6.append(row_list)
+
+                fill = PatternFill(start_color="FFC7CE" if status=="Incomplete" else "C6EFCE", fill_type="solid")
+
+                for cell in ws6[ws6.max_row]:
+                    cell.fill = fill
+
+            auto_width(ws6)
+
+            # ===== SAVE =====
             output = BytesIO()
             wb.save(output)
             return output.getvalue()
