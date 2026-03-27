@@ -4,8 +4,8 @@ from io import BytesIO
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.chart import BarChart, Reference
 from openpyxl.drawing.image import Image
+from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="MCF Admission Auditor", layout="wide")
 
@@ -60,12 +60,8 @@ if uploaded_file is not None:
         # -------- AUDIT --------
         st.subheader("🧾 Audit Report")
 
-        unknown = df[~df[camp_col].isin(camp_map.values())]
-        st.write("❗ Unknown Camps:", len(unknown))
-
-        blank_emp = df[df[emp_col] == ""]
-        st.write("❗ Blank Employees:", len(blank_emp))
-
+        st.write("❗ Unknown Camps:", len(df[~df[camp_col].isin(camp_map.values())]))
+        st.write("❗ Blank Employees:", len(df[df[emp_col] == ""]))
         st.write("📊 Input Rows:", len(df))
 
         # -------- PIVOT --------
@@ -90,6 +86,21 @@ if uploaded_file is not None:
         st.subheader("📋 Final Report")
         st.dataframe(final_df, use_container_width=True)
 
+        # -------- AUTO WIDTH FIX --------
+        def auto_width(ws):
+            for col_cells in ws.iter_cols(min_row=1, max_row=ws.max_row):
+                max_length = 0
+                col_letter = get_column_letter(col_cells[0].column)
+
+                for cell in col_cells:
+                    try:
+                        if cell.value:
+                            max_length = max(max_length, len(str(cell.value)))
+                    except:
+                        pass
+
+                ws.column_dimensions[col_letter].width = max_length + 3
+
         # -------- EXCEL FUNCTION --------
         def to_excel(df, raw_df):
             wb = Workbook()
@@ -101,15 +112,6 @@ if uploaded_file is not None:
 
             border = Border(left=Side(style='thin'), right=Side(style='thin'),
                             top=Side(style='thin'), bottom=Side(style='thin'))
-
-            def auto_width(ws):
-                for col in ws.columns:
-                    max_len = 0
-                    col_letter = col[0].column_letter
-                    for cell in col:
-                        if cell.value:
-                            max_len = max(max_len, len(str(cell.value)))
-                    ws.column_dimensions[col_letter].width = max_len + 3
 
             # ===== SHEET 1 =====
             ws = wb.active
@@ -153,8 +155,10 @@ if uploaded_file is not None:
 
             for row in raw_df.values:
                 row_list = list(row)
+
                 status = "Incomplete" if any(pd.isna(x) or str(x).strip() == "" for x in row_list) else "Complete"
                 row_list.append(status)
+
                 ws6.append(row_list)
 
                 fill = PatternFill(start_color="FFC7CE" if status=="Incomplete" else "C6EFCE", fill_type="solid")
@@ -164,7 +168,6 @@ if uploaded_file is not None:
 
             auto_width(ws6)
 
-            # ===== SAVE =====
             output = BytesIO()
             wb.save(output)
             return output.getvalue()
