@@ -19,10 +19,12 @@ if uploaded_file is not None:
         df_raw = pd.read_excel(uploaded_file)
         df_raw.columns = df_raw.columns.astype(str).str.strip()
 
+        # ✅ FIX 1: Remove NaN from raw data
+        df_raw = df_raw.fillna("")
+
         st.subheader("🔍 Raw Data Preview")
         st.dataframe(df_raw)
 
-        # -------- FIND COLUMNS --------
         def find_col(keys):
             for col in df_raw.columns:
                 for k in keys:
@@ -39,11 +41,9 @@ if uploaded_file is not None:
 
         df = df_raw[[emp_col, camp_col]].copy()
 
-        # -------- CLEAN DATA --------
         df[emp_col] = df[emp_col].astype(str).str.strip().str.upper()
         df[camp_col] = df[camp_col].astype(str).str.strip()
 
-        # -------- PIVOT --------
         pivot = pd.pivot_table(df, index=emp_col, columns=camp_col, aggfunc="size", fill_value=0)
         pivot = pivot.reset_index()
         pivot.rename(columns={emp_col: "Employee Name"}, inplace=True)
@@ -55,16 +55,17 @@ if uploaded_file is not None:
 
         final_df = pd.concat([pivot, total_row], ignore_index=True)
 
+        # ✅ FIX 2: Remove NaN from final report
+        final_df = final_df.fillna("")
+
         st.subheader("📋 Final Report")
         st.dataframe(final_df, use_container_width=True)
 
-        # -------- AUTO WIDTH --------
         def auto_width(ws):
             for col_cells in ws.iter_cols():
                 max_len = max((len(str(c.value)) for c in col_cells if c.value), default=0)
                 ws.column_dimensions[get_column_letter(col_cells[0].column)].width = max_len + 3
 
-        # -------- EXCEL FUNCTION --------
         def to_excel(df, raw_df):
             wb = Workbook()
 
@@ -91,7 +92,6 @@ if uploaded_file is not None:
 
             start_row = 4
 
-            # Header
             for col_num, col_name in enumerate(df.columns, 1):
                 cell = ws.cell(row=start_row, column=col_num, value=col_name)
                 cell.fill = header_fill
@@ -99,14 +99,12 @@ if uploaded_file is not None:
                 cell.alignment = center
                 cell.border = thin
 
-            # Data
             for r, row in enumerate(df.values, start_row + 1):
                 ws.append(list(row))
                 for c in range(1, len(df.columns)+1):
                     ws.cell(row=r, column=c).border = thin
                     ws.cell(row=r, column=c).alignment = center
 
-            # Highlight total row
             for c in range(1, len(df.columns)+1):
                 cell = ws.cell(row=ws.max_row, column=c)
                 cell.font = bold_font
@@ -184,7 +182,7 @@ if uploaded_file is not None:
 
             for row in raw_df.values:
                 row_list = list(row)
-                status = "Incomplete" if any(pd.isna(x) or str(x).strip()=="" for x in row_list) else "Complete"
+                status = "Incomplete" if any(str(x).strip()=="" for x in row_list) else "Complete"
                 ws6.append(row_list + [status])
 
             auto_width(ws6)
