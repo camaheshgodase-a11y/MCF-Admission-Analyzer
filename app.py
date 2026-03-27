@@ -4,7 +4,7 @@ from io import BytesIO
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.chart import BarChart, Reference
+from openpyxl.chart import BarChart, Reference, PieChart
 from openpyxl.drawing.image import Image
 from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import CellIsRule
@@ -82,7 +82,7 @@ if uploaded_file is not None:
         st.subheader("📋 Final Report")
         st.dataframe(final_df, use_container_width=True)
 
-        # -------- AUTO WIDTH FUNCTION --------
+        # -------- AUTO WIDTH --------
         def auto_width(ws):
             for col_cells in ws.iter_cols():
                 col_letter = get_column_letter(col_cells[0].column)
@@ -102,7 +102,7 @@ if uploaded_file is not None:
                 top=Side(style="thin"), bottom=Side(style="thin")
             )
 
-            # ===== SHEET 1: MAIN REPORT =====
+            # ===== MAIN REPORT =====
             ws = wb.active
             ws.title = "Admission Report"
 
@@ -116,7 +116,6 @@ if uploaded_file is not None:
 
             start_row = 4
 
-            # Header styling
             for col_num, col_name in enumerate(df.columns, 1):
                 cell = ws.cell(row=start_row, column=col_num, value=col_name)
                 cell.fill = header_fill
@@ -124,116 +123,35 @@ if uploaded_file is not None:
                 cell.alignment = center
                 cell.border = thin
 
-            # Data
             for r, row in enumerate(df.values, start_row + 1):
                 ws.append(list(row))
                 for c in range(1, len(df.columns)+1):
                     ws.cell(row=r, column=c).border = thin
 
-            # Highlight total row
-            last_row = ws.max_row
-            for col in range(1, len(df.columns)+1):
-                cell = ws.cell(row=last_row, column=col)
-                cell.font = Font(bold=True)
-                cell.fill = PatternFill(start_color="D9E1F2", fill_type="solid")
+            # Highlight total
+            for c in range(1, len(df.columns)+1):
+                ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
 
-            # Freeze + filter
             ws.freeze_panes = "A5"
-            ws.auto_filter.ref = f"A{start_row}:{get_column_letter(len(df.columns))}{ws.max_row}"
-
-            # Low performer highlight
-            ws.conditional_formatting.add(
-                f"{get_column_letter(len(df.columns))}{start_row+1}:{get_column_letter(len(df.columns))}{ws.max_row}",
-                CellIsRule(operator='lessThan', formula=['5'], fill=PatternFill(start_color="FFC7CE", fill_type="solid"))
-            )
-
             auto_width(ws)
 
-            # ===== SHEET 2: DASHBOARD =====
+            # ===== DASHBOARD =====
             ws2 = wb.create_sheet("Dashboard")
 
-            ws2["A1"] = "KPI Dashboard"
-            ws2["A1"].font = Font(size=14, bold=True)
-
             total_adm = df.iloc[-1]["Total"]
-            top_emp = df.iloc[:-1].sort_values(by="Total", ascending=False).iloc[0]["Employee Name"]
-
-            ws2.append(["Metric", "Value"])
             ws2.append(["Total Admissions", total_adm])
-            ws2.append(["Top Performer", top_emp])
 
-            chart1 = BarChart()
-            chart1.title = "Employee-wise Admissions"
-
+            chart = BarChart()
             data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=ws.max_row)
             cats = Reference(ws, min_col=1, min_row=5, max_row=ws.max_row-1)
 
-            chart1.add_data(data, titles_from_data=True)
-            chart1.set_categories(cats)
-
-            ws2.add_chart(chart1, "E2")
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(cats)
+            ws2.add_chart(chart, "A5")
 
             auto_width(ws2)
 
-            # ===== SHEET 3: CAMP ANALYSIS =====
-            ws3 = wb.create_sheet("Camp Analysis")
-            ws3.append(["Camp", "Total", "%"])
-
-            total = df.iloc[-1]["Total"]
-
-            for col in df.columns[1:-1]:
-                val = df.iloc[-1][col]
-                percent = (val/total) if total else 0
-                ws3.append([col, val, percent])
-
-            for row in ws3.iter_rows(min_row=2, min_col=3, max_col=3):
-                for cell in row:
-                    cell.number_format = '0.00%'
-
-            auto_width(ws3)
-
-            # ===== SHEET 4: TOP PERFORMERS =====
-            ws4 = wb.create_sheet("Top Performers")
-
-            temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
-            ws4.append(["Rank", "Employee", "Total"])
-
-            for i, row in enumerate(temp.values, 1):
-                ws4.append([i, row[0], row[-1]])
-
-            # Highlight top 3
-            for row in ws4.iter_rows(min_row=2, max_row=4):
-                for cell in row:
-                    cell.fill = PatternFill(start_color="C6EFCE", fill_type="solid")
-                    cell.font = Font(bold=True)
-
-            auto_width(ws4)
-
-            # ===== SHEET 5: AUDIT =====
-            ws5 = wb.create_sheet("Audit Summary")
-            ws5.append(["Metric", "Value"])
-            ws5.append(["Total Records", len(raw_df)])
-            ws5.append(["Final Count", df.iloc[-1]["Total"]])
-            ws5.append(["Difference", len(raw_df) - df.iloc[-1]["Total"]])
-
-            auto_width(ws5)
-
-            # ===== SHEET 6: RAW DATA =====
-            ws6 = wb.create_sheet("Raw Data")
-            ws6.append(list(raw_df.columns) + ["Status"])
-
-            for row in raw_df.values:
-                row_list = list(row)
-                status = "Incomplete" if any(pd.isna(x) or str(x).strip()=="" for x in row_list) else "Complete"
-                ws6.append(row_list + [status])
-
-                fill = PatternFill(start_color="FFC7CE" if status=="Incomplete" else "C6EFCE", fill_type="solid")
-                for cell in ws6[ws6.max_row]:
-                    cell.fill = fill
-
-            auto_width(ws6)
-
-            # ===== SHEET 7: FEES COLLECTION =====
+            # ===== FEES COLLECTION WITH BALANCE =====
             ws7 = wb.create_sheet("Fees Collection")
 
             fee_col = None
@@ -241,45 +159,70 @@ if uploaded_file is not None:
                 if "fee" in col.lower() or "amount" in col.lower():
                     fee_col = col
 
+            EXPECTED = 5000
+
             if fee_col:
                 temp_fee = raw_df.copy()
                 temp_fee[fee_col] = pd.to_numeric(temp_fee[fee_col], errors="coerce").fillna(0)
+
                 summary = temp_fee.groupby(emp_col)[fee_col].sum().reset_index()
 
-                ws7.append(["Employee", "Collected Fees"])
+                ws7.append(["Employee", "Collected", "Expected", "Balance"])
+
                 for row in summary.values:
-                    ws7.append(list(row))
-            else:
-                ws7.append(["No Fees Column Found"])
+                    name = row[0]
+                    collected = row[1]
+
+                    admissions = df[df["Employee Name"] == name]["Total"].values
+                    admissions = admissions[0] if len(admissions) else 0
+
+                    expected = admissions * EXPECTED
+                    balance = expected - collected
+
+                    ws7.append([name, collected, expected, balance])
 
             auto_width(ws7)
 
-            # ===== SHEET 8: FEES ANALYSIS =====
+            # ===== FEES ANALYSIS + PIE =====
             ws8 = wb.create_sheet("Fees Analysis")
 
             if fee_col:
                 summary = temp_fee.groupby(camp_col)[fee_col].sum().reset_index()
                 total_fee = summary[fee_col].sum()
 
-                ws8.append(["Camp", "Fees", "%"])
+                ws8.append(["Camp", "Fees"])
 
                 for row in summary.values:
-                    percent = (row[1]/total_fee*100) if total_fee else 0
-                    ws8.append([row[0], row[1], round(percent, 2)])
-            else:
-                ws8.append(["No Fees Column Found"])
+                    ws8.append([row[0], row[1]])
+
+                pie = PieChart()
+                data = Reference(ws8, min_col=2, min_row=1, max_row=len(summary)+1)
+                labels = Reference(ws8, min_col=1, min_row=2, max_row=len(summary)+1)
+
+                pie.add_data(data, titles_from_data=True)
+                pie.set_categories(labels)
+
+                ws8.add_chart(pie, "E2")
 
             auto_width(ws8)
+
+            # ===== STUDENT AUDIT =====
+            ws9 = wb.create_sheet("Student Audit")
+            ws9.append(list(raw_df.columns))
+
+            for row in raw_df.values:
+                ws9.append(list(row))
+
+            auto_width(ws9)
 
             output = BytesIO()
             wb.save(output)
             return output.getvalue()
 
-        # -------- DOWNLOAD --------
         st.download_button(
-            "📥 Download Premium MIS Excel",
+            "📥 Download Advanced MIS Excel",
             data=to_excel(final_df, df_raw),
-            file_name="MCF_Premium_MIS.xlsx",
+            file_name="MCF_Advanced_MIS.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
