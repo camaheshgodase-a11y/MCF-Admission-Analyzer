@@ -8,16 +8,15 @@ uploaded_file = st.file_uploader("Upload Admission Excel File", type=["xlsx"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
-    # Clean column names (VERY IMPORTANT)
+    # Clean column names
     df.columns = df.columns.str.strip()
 
-    st.write("Columns detected:", df.columns.tolist())
-
-    employee_col = "Employee Name"
-    camp_col = "Camp Name"
-    date_col = "Admission Date"
-    fees_col = "TOTAL FEES RE"
-    balance_col = "BALANCE"
+    st.subheader("Select Columns")
+    employee_col = st.selectbox("Select Employee Name Column", df.columns)
+    camp_col = st.selectbox("Select Camp Name Column", df.columns)
+    date_col = st.selectbox("Select Admission Date Column", df.columns)
+    fees_col = st.selectbox("Select Fees Column", df.columns)
+    balance_col = st.selectbox("Select Balance Column", df.columns)
 
     # Clean data
     df[employee_col] = df[employee_col].astype(str).str.strip()
