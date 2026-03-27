@@ -20,9 +20,7 @@ if uploaded_file is not None:
         df_raw = pd.read_excel(uploaded_file)
         df_raw.columns = df_raw.columns.astype(str).str.strip()
 
-        # Keep blank but don't count them
         df_raw_display = df_raw.fillna("")
-
         st.subheader("🔍 Raw Data Preview")
         st.dataframe(df_raw_display)
 
@@ -40,13 +38,11 @@ if uploaded_file is not None:
             st.error("❌ Required columns not found")
             st.stop()
 
-        # 🔥 IMPORTANT: drop NaN ONLY for calculation (not display)
         df_calc = df_raw[[emp_col, camp_col]].dropna()
 
         df_calc[emp_col] = df_calc[emp_col].astype(str).str.strip().str.upper()
         df_calc[camp_col] = df_calc[camp_col].astype(str).str.strip()
 
-        # -------- PIVOT --------
         pivot = pd.pivot_table(df_calc, index=emp_col, columns=camp_col, aggfunc="size", fill_value=0)
 
         pivot = pivot.reset_index()
@@ -83,17 +79,43 @@ if uploaded_file is not None:
 
             center = Alignment(horizontal="center", vertical="center")
 
-            # ===== SHEET 1: ADMISSION REPORT =====
+            # ===== IMPROVED ADMISSION REPORT =====
             ws = wb.active
             ws.title = "Admission Report"
 
-            ws.append(list(df.columns))
-            for row in df.values:
-                ws.append(list(row))
+            # Title
+            ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=len(df.columns))
+            ws.cell(1, 1).value = "MCF Admission MIS Report"
+            ws.cell(1, 1).font = title_font
+            ws.cell(1, 1).alignment = center
 
+            start_row = 4
+
+            # Header
+            for col_num, col_name in enumerate(df.columns, 1):
+                cell = ws.cell(row=start_row, column=col_num, value=col_name)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = center
+                cell.border = thin
+
+            # Data
+            for r, row in enumerate(df.values, start_row + 1):
+                ws.append(list(row))
+                for c in range(1, len(df.columns)+1):
+                    ws.cell(row=r, column=c).border = thin
+                    ws.cell(row=r, column=c).alignment = center
+
+            # Highlight total row
+            for c in range(1, len(df.columns)+1):
+                cell = ws.cell(row=ws.max_row, column=c)
+                cell.font = bold_font
+                cell.fill = PatternFill(start_color="D9E1F2", fill_type="solid")
+
+            ws.freeze_panes = "A5"
             auto_width(ws)
 
-            # ===== SHEET 2: FEES ANALYSIS (MOVED HERE) =====
+            # ===== FEES ANALYSIS (MEDIUM PIE) =====
             ws8 = wb.create_sheet("Fees Analysis", 1)
 
             fee_col = None
@@ -121,15 +143,15 @@ if uploaded_file is not None:
                 pie.add_data(data, titles_from_data=True)
                 pie.set_categories(labels)
 
-                # 🎨 Add colors
+                # Colors
                 colors = ["FF6384","36A2EB","FFCE56","4BC0C0","9966FF","FF9F40"]
                 pie.series[0].data_points = [DataPoint(idx=i) for i in range(len(summary))]
                 for i, dp in enumerate(pie.series[0].data_points):
                     dp.graphicalProperties.solidFill = colors[i % len(colors)]
 
-                # 📊 Bigger size
-                pie.width = 20
-                pie.height = 15
+                # Medium size
+                pie.width = 12
+                pie.height = 10
 
                 ws8.add_chart(pie, "E2")
 
@@ -138,54 +160,32 @@ if uploaded_file is not None:
 
             auto_width(ws8)
 
-            # ===== DASHBOARD =====
+            # ===== REST SAME =====
             ws2 = wb.create_sheet("Dashboard")
-
             chart = BarChart()
-            chart.title = "Employee-wise Admissions"
-
-            data = Reference(ws, min_col=len(df.columns), min_row=1, max_row=len(df))
-            cats = Reference(ws, min_col=1, min_row=2, max_row=len(df))
-
+            data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=ws.max_row)
+            cats = Reference(ws, min_col=1, min_row=5, max_row=ws.max_row-1)
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(cats)
-
             ws2.add_chart(chart, "A1")
 
-            auto_width(ws2)
-
-            # ===== CAMP ANALYSIS =====
             ws3 = wb.create_sheet("Camp Analysis")
             ws3.append(["Camp", "Total", "%"])
-
             total = df.iloc[-1]["Total"]
-
             for col in df.columns[1:-1]:
                 val = df.iloc[-1][col]
-                percent = (val/total) if total else 0
-                ws3.append([col, val, percent])
+                ws3.append([col, val, val/total if total else 0])
 
-            auto_width(ws3)
-
-            # ===== TOP PERFORMERS =====
             ws4 = wb.create_sheet("Top Performers")
-
             temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
             ws4.append(["Rank", "Employee", "Total"])
-
             for i, row in enumerate(temp.values, 1):
                 ws4.append([i, row[0], row[-1]])
 
-            auto_width(ws4)
-
-            # ===== RAW DATA =====
             ws6 = wb.create_sheet("Raw Data")
             ws6.append(list(raw_df.columns))
-
             for row in raw_df.fillna("").values:
                 ws6.append(list(row))
-
-            auto_width(ws6)
 
             output = BytesIO()
             wb.save(output)
