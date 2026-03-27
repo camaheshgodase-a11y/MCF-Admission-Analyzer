@@ -10,9 +10,15 @@ if uploaded_file:
 
     st.write("Columns in your file:", df.columns.tolist())
 
-    # Select columns manually after seeing names
+    # Select columns
     employee_col = st.selectbox("Select Employee Column", df.columns)
     camp_col = st.selectbox("Select Camp Column", df.columns)
+
+    # Clean Data (IMPORTANT)
+    df[employee_col] = df[employee_col].astype(str)
+    df[camp_col] = df[camp_col].astype(str)
+
+    df = df.dropna(subset=[employee_col, camp_col])
 
     # Pivot Table
     pivot_table = pd.pivot_table(
