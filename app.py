@@ -8,34 +8,35 @@ uploaded_file = st.file_uploader("Upload Admission Excel File", type=["xlsx"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
+    # Remove blank rows
+    df = df.dropna(how='all')
+
     # Clean column names
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.astype(str).str.strip()
 
     st.subheader("Select Columns")
-    employee_col = st.selectbox("Select Employee Name Column", df.columns)
-    camp_col = st.selectbox("Select Camp Name Column", df.columns)
-    date_col = st.selectbox("Select Admission Date Column", df.columns)
-    fees_col = st.selectbox("Select Fees Column", df.columns)
-    balance_col = st.selectbox("Select Balance Column", df.columns)
+    employee_col = st.selectbox("Employee Name Column", df.columns)
+    camp_col = st.selectbox("Camp Name Column", df.columns)
+    date_col = st.selectbox("Admission Date Column", df.columns)
+    fees_col = st.selectbox("Fees Column", df.columns)
+    balance_col = st.selectbox("Balance Column", df.columns)
 
-    # Clean text columns
+    # Clean text
     df[employee_col] = df[employee_col].astype(str).str.strip()
     df[camp_col] = df[camp_col].astype(str).str.strip()
 
-    # Convert Date safely
+    # Convert Date
     df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-
-    # Drop rows where date is blank
     df = df[df[date_col].notna()]
 
-    # Convert Fees & Balance to numbers
+    # Convert numeric
     df[fees_col] = pd.to_numeric(df[fees_col], errors='coerce').fillna(0)
     df[balance_col] = pd.to_numeric(df[balance_col], errors='coerce').fillna(0)
 
-    # Create Month column safely
+    # Month Column
     df['Month'] = df[date_col].apply(lambda x: x.strftime('%Y-%m'))
 
-    # Pivot Table
+    # Pivot Table Camp vs Employee
     pivot_table = pd.pivot_table(
         df,
         index=camp_col,
@@ -44,17 +45,24 @@ if uploaded_file:
         fill_value=0
     )
 
-    # Summaries
-    employee_summary = df.groupby(employee_col).size().reset_index(name="Admissions")
-    camp_summary = df.groupby(camp_col).size().reset_index(name="Admissions")
-    date_summary = df.groupby(date_col).size().reset_index(name="Admissions")
-    month_summary = df.groupby('Month').size().reset_index(name="Admissions")
-
-    fees_summary = df.groupby(employee_col)[fees_col].sum().reset_index()
-    balance_summary = df.groupby(employee_col)[balance_col].sum().reset_index()
-
     st.subheader("Camp vs Employee Admission Count")
     st.dataframe(pivot_table)
+
+    # Summaries
+    employee_summary = df.groupby(employee_col).size().reset_index()
+    employee_summary.columns = [employee_col, "Admissions"]
+
+    camp_summary = df.groupby(camp_col).size().reset_index()
+    camp_summary.columns = [camp_col, "Admissions"]
+
+    date_summary = df.groupby(date_col).size().reset_index()
+    date_summary.columns = ["Date", "Admissions"]
+
+    month_summary = df.groupby('Month').size().reset_index()
+    month_summary.columns = ["Month", "Admissions"]
+
+    fees_summary = df.groupby(employee_col, as_index=False)[fees_col].sum()
+    balance_summary = df.groupby(employee_col, as_index=False)[balance_col].sum()
 
     # Save Excel
     output_file = "MCF_Admission_MIS_Report.xlsx"
