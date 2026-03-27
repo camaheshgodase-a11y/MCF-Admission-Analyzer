@@ -19,7 +19,6 @@ if uploaded_file is not None:
     try:
         df_raw = pd.read_excel(uploaded_file)
         df_raw.columns = df_raw.columns.astype(str).str.strip()
-
         df_raw_display = df_raw.fillna("")
         st.subheader("🔍 Raw Data Preview")
         st.dataframe(df_raw_display)
@@ -39,19 +38,15 @@ if uploaded_file is not None:
             st.stop()
 
         df_calc = df_raw[[emp_col, camp_col]].dropna()
-
         df_calc[emp_col] = df_calc[emp_col].astype(str).str.strip().str.upper()
         df_calc[camp_col] = df_calc[camp_col].astype(str).str.strip()
 
         pivot = pd.pivot_table(df_calc, index=emp_col, columns=camp_col, aggfunc="size", fill_value=0)
         pivot = pivot.reset_index()
         pivot.rename(columns={emp_col: "Employee Name"}, inplace=True)
-
         pivot["Total"] = pivot.iloc[:, 1:].sum(axis=1)
-
         total_row = pd.DataFrame(pivot.iloc[:, 1:].sum()).T
         total_row.insert(0, "Employee Name", "Total")
-
         final_df = pd.concat([pivot, total_row], ignore_index=True)
 
         st.subheader("📋 Final Report")
@@ -65,115 +60,126 @@ if uploaded_file is not None:
         def to_excel(df, raw_df):
 
             wb = Workbook()
-
             header_fill = PatternFill(start_color="1F4E78", fill_type="solid")
             header_font = Font(bold=True, color="FFFFFF")
+            title_font = Font(size=16, bold=True)
             bold_font = Font(bold=True)
-
-            thin = Border(
-                left=Side(style="thin"), right=Side(style="thin"),
-                top=Side(style="thin"), bottom=Side(style="thin")
-            )
+            thin = Border(left=Side(style="thin"), right=Side(style="thin"),
+                          top=Side(style="thin"), bottom=Side(style="thin"))
+            center = Alignment(horizontal="center", vertical="center")
 
             # ===== ADMISSION REPORT =====
             ws = wb.active
             ws.title = "Admission Report"
-            ws.append(list(df.columns))
-            for row in df.values:
+            ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=len(df.columns))
+            ws.cell(1, 1).value = "MCF Admission MIS Report"
+            ws.cell(1, 1).font = title_font
+            ws.cell(1, 1).alignment = center
+            start_row = 4
+            for col_num, col_name in enumerate(df.columns, 1):
+                cell = ws.cell(row=start_row, column=col_num, value=col_name)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = center
+                cell.border = thin
+            for r, row in enumerate(df.values, start_row + 1):
                 ws.append(list(row))
+                for c in range(1, len(df.columns)+1):
+                    ws.cell(row=r, column=c).border = thin
+                    ws.cell(row=r, column=c).alignment = center
+            for c in range(1, len(df.columns)+1):
+                cell = ws.cell(row=ws.max_row, column=c)
+                cell.font = bold_font
+                cell.fill = PatternFill(start_color="D9E1F2", fill_type="solid")
+            ws.freeze_panes = "A5"
             auto_width(ws)
 
             # ===== FEES ANALYSIS =====
             ws8 = wb.create_sheet("Fees Analysis", 1)
-
             fee_col = None
             for col in raw_df.columns:
                 if "fee" in col.lower() or "amount" in col.lower():
                     fee_col = col
-
             if fee_col:
                 temp_fee = raw_df.copy()
                 temp_fee[fee_col] = pd.to_numeric(temp_fee[fee_col], errors="coerce").fillna(0)
                 summary = temp_fee.groupby(camp_col)[fee_col].sum().reset_index()
-
                 ws8.append(["Camp", "Fees"])
                 for row in summary.values:
                     ws8.append([row[0], row[1]])
-
                 pie = PieChart()
+                pie.title = "Camp-wise Fees Distribution"
                 data = Reference(ws8, min_col=2, min_row=1, max_row=len(summary)+1)
                 labels = Reference(ws8, min_col=1, min_row=2, max_row=len(summary)+1)
-
                 pie.add_data(data, titles_from_data=True)
                 pie.set_categories(labels)
-
+                colors = ["FF6384","36A2EB","FFCE56","4BC0C0","9966FF","FF9F40"]
+                pie.series[0].data_points = [DataPoint(idx=i) for i in range(len(summary))]
+                for i, dp in enumerate(pie.series[0].data_points):
+                    dp.graphicalProperties.solidFill = colors[i % len(colors)]
                 pie.width = 12
                 pie.height = 10
-
                 ws8.add_chart(pie, "E2")
-
+            else:
+                ws8.append(["No Fees Column Found"])
             auto_width(ws8)
 
-            # ===== CAMP ANALYSIS (IMPROVED) =====
+            # ===== DASHBOARD =====
+            ws2 = wb.create_sheet("Dashboard")
+            chart = BarChart()
+            data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=ws.max_row)
+            cats = Reference(ws, min_col=1, min_row=5, max_row=ws.max_row-1)
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(cats)
+            ws2.add_chart(chart, "A1")
+
+            # ===== IMPROVED CAMP ANALYSIS =====
             ws3 = wb.create_sheet("Camp Analysis")
-
-            ws3.append(["Rank", "Camp", "Total", "% Contribution"])
-
+            # Table headers with colors
+            ws3.append(["Rank", "Camp", "Total", "%"])
+            for col_num in range(1, 5):
+                cell = ws3.cell(row=1, column=col_num)
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill(start_color="4F81BD", fill_type="solid")
+                cell.alignment = center
             total = df.iloc[-1]["Total"]
-
-            camp_data = []
-            for col in df.columns[1:-1]:
-                val = df.iloc[-1][col]
-                percent = (val/total) if total else 0
-                camp_data.append((col, val, percent))
-
-            # Sort descending
-            camp_data = sorted(camp_data, key=lambda x: x[1], reverse=True)
-
-            # Write data with rank
-            for i, row in enumerate(camp_data, 1):
-                ws3.append([i, row[0], row[1], row[2]])
-
-            # Header styling
-            for cell in ws3[1]:
-                cell.fill = header_fill
-                cell.font = header_font
-
-            # % format
-            for row in ws3.iter_rows(min_row=2, min_col=4, max_col=4):
-                for cell in row:
-                    cell.number_format = "0.00%"
-
+            camp_list = df.columns[1:-1]
+            camp_totals = [df.iloc[-1][c] for c in camp_list]
+            # Rank camps descending
+            camp_ranking = sorted(zip(camp_list, camp_totals), key=lambda x: x[1], reverse=True)
+            for idx, (camp, val) in enumerate(camp_ranking, 1):
+                ws3.append([idx, camp, val, val/total if total else 0])
             auto_width(ws3)
-
-            # 📊 BAR CHART
+            # Pie Chart for Camp Analysis
+            pie = PieChart()
+            pie.title = "Camp-wise Distribution"
+            data = Reference(ws3, min_col=3, min_row=1, max_row=len(camp_ranking)+1)
+            labels = Reference(ws3, min_col=2, min_row=2, max_row=len(camp_ranking)+1)
+            pie.add_data(data, titles_from_data=True)
+            pie.set_categories(labels)
+            pie.width = 12
+            pie.height = 10
+            ws3.add_chart(pie, "F2")
+            # Bar Chart for Camp Analysis
             bar = BarChart()
-            data = Reference(ws3, min_col=3, min_row=1, max_row=len(camp_data)+1)
-            cats = Reference(ws3, min_col=2, min_row=2, max_row=len(camp_data)+1)
-
+            bar.title = "Camp-wise Total"
             bar.add_data(data, titles_from_data=True)
-            bar.set_categories(cats)
-            bar.title = "Camp Performance"
-
-            ws3.add_chart(bar, "F2")
-
-            # 🥧 PIE CHART (MEDIUM)
-            pie2 = PieChart()
-            data = Reference(ws3, min_col=3, min_row=1, max_row=len(camp_data)+1)
-            labels = Reference(ws3, min_col=2, min_row=2, max_row=len(camp_data)+1)
-
-            pie2.add_data(data, titles_from_data=True)
-            pie2.set_categories(labels)
-
-            pie2.width = 12
-            pie2.height = 10
-
-            ws3.add_chart(pie2, "F20")
+            bar.set_categories(labels)
+            bar.width = 16
+            bar.height = 10
+            ws3.add_chart(bar, "F18")
 
             # ===== REST SAME =====
-            wb.create_sheet("Dashboard")
-            wb.create_sheet("Top Performers")
-            wb.create_sheet("Raw Data")
+            ws4 = wb.create_sheet("Top Performers")
+            temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
+            ws4.append(["Rank", "Employee", "Total"])
+            for i, row in enumerate(temp.values, 1):
+                ws4.append([i, row[0], row[-1]])
+
+            ws6 = wb.create_sheet("Raw Data")
+            ws6.append(list(raw_df.columns))
+            for row in raw_df.fillna("").values:
+                ws6.append(list(row))
 
             output = BytesIO()
             wb.save(output)
@@ -189,6 +195,5 @@ if uploaded_file is not None:
     except Exception as e:
         st.error("❌ Error occurred")
         st.exception(e)
-
 else:
     st.info("👆 Upload file to start")
