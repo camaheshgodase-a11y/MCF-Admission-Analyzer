@@ -8,7 +8,7 @@ uploaded_file = st.file_uploader("Upload Admission Excel File", type=["xlsx"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
-    # Clean column names (removes extra spaces)
+    # Clean column names
     df.columns = df.columns.str.strip()
 
     st.subheader("Select Columns")
@@ -21,11 +21,17 @@ if uploaded_file:
     # Clean data
     df[employee_col] = df[employee_col].astype(str).str.strip()
     df[camp_col] = df[camp_col].astype(str).str.strip()
-    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
 
-    # ✅ FIX: Convert Fees & Balance to numeric
+    # Convert Date
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    df = df.dropna(subset=[date_col])
+
+    # Convert Fees & Balance
     df[fees_col] = pd.to_numeric(df[fees_col], errors='coerce').fillna(0)
     df[balance_col] = pd.to_numeric(df[balance_col], errors='coerce').fillna(0)
+
+    # Create Month
+    df['Month'] = df[date_col].dt.to_period('M').astype(str)
 
     # Pivot Table
     pivot_table = pd.pivot_table(
@@ -40,14 +46,11 @@ if uploaded_file:
     employee_summary = df.groupby(employee_col).size().reset_index(name="Admissions")
     camp_summary = df.groupby(camp_col).size().reset_index(name="Admissions")
     date_summary = df.groupby(date_col).size().reset_index(name="Admissions")
-
-    df['Month'] = df[date_col].dt.to_period('M')
     month_summary = df.groupby('Month').size().reset_index(name="Admissions")
 
     fees_summary = df.groupby(employee_col)[fees_col].sum().reset_index()
     balance_summary = df.groupby(employee_col)[balance_col].sum().reset_index()
 
-    # Show Pivot
     st.subheader("Camp vs Employee Admission Count")
     st.dataframe(pivot_table)
 
@@ -63,7 +66,6 @@ if uploaded_file:
         fees_summary.to_excel(writer, sheet_name='Fees Summary', index=False)
         balance_summary.to_excel(writer, sheet_name='Balance Summary', index=False)
 
-    # Download button
     with open(output_file, "rb") as file:
         st.download_button(
             label="Download Full MIS Excel Report",
