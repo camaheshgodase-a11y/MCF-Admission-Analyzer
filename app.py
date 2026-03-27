@@ -1,94 +1,114 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
 
-st.set_page_config(page_title="MCF Admission MIS", layout="wide")
+# ------------------ PAGE CONFIG ------------------
+st.set_page_config(page_title="MCF Admission Analyzer", layout="wide")
 
-st.title("MCF Admission MIS Analyzer")
+st.title("📊 MCF Admission Analyzer")
+st.write("Upload your MCF Admission Template Excel file to generate Admission Format.")
 
-uploaded_file = st.file_uploader("Upload Admission Excel File", type=["xlsx"])
+# ------------------ FILE UPLOAD ------------------
+uploaded_file = st.file_uploader("📂 Upload Excel File", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
-        # Read Excel
+        # ------------------ READ FILE ------------------
         df = pd.read_excel(uploaded_file)
-
-        st.subheader("Preview Data")
-        st.dataframe(df.head())
-
-        # Remove blank rows
-        df = df.dropna(how='all')
-
-        # Clean column names
         df.columns = df.columns.astype(str).str.strip()
 
-        st.subheader("Select Required Columns")
+        st.subheader("🔍 Raw Data Preview")
+        st.dataframe(df)
 
-        employee_col = st.selectbox("Employee Name Column", df.columns)
-        camp_col = st.selectbox("Camp Name Column", df.columns)
-        date_col = st.selectbox("Admission Date Column", df.columns)
-        fees_col = st.selectbox("Fees Column", df.columns)
-        balance_col = st.selectbox("Balance Column", df.columns)
+        # ------------------ VALIDATION ------------------
+        if df.empty:
+            st.warning("⚠️ Uploaded file is empty")
+            st.stop()
 
-        if st.button("Generate MIS Report"):
+        # ------------------ AUTO COLUMN DETECTION ------------------
+        def find_column(keywords):
+            for col in df.columns:
+                for k in keywords:
+                    if k in col.lower():
+                        return col
+            return None
 
-            # Clean text fields
-            df[employee_col] = df[employee_col].astype(str).str.strip()
-            df[camp_col] = df[camp_col].astype(str).str.strip()
+        name_col = find_column(["name", "student"])
+        camp_col = find_column(["camp", "days", "duration"])
+        fees_col = find_column(["fee", "amount", "paid"])
 
-            # Convert Date
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-            df = df[df[date_col].notna()]
+        # ------------------ FALLBACK (NO CRASH) ------------------
+        if name_col is None:
+            name_col = df.columns[0]
 
-            # Convert numeric
-            df[fees_col] = pd.to_numeric(df[fees_col], errors='coerce').fillna(0)
-            df[balance_col] = pd.to_numeric(df[balance_col], errors='coerce').fillna(0)
+        if camp_col is None:
+            camp_col = df.columns[1]
 
-            # Month column
-            df['Month'] = df[date_col].dt.strftime('%Y-%m')
+        if fees_col is None:
+            fees_col = df.columns[-1]
 
-            # Pivot table
-            pivot_table = pd.pivot_table(
-                df,
-                index=camp_col,
-                columns=employee_col,
-                aggfunc='size',
-                fill_value=0
-            )
+        st.write("✅ Detected Columns:")
+        st.write(f"Name: {name_col}")
+        st.write(f"Camp: {camp_col}")
+        st.write(f"Fees: {fees_col}")
 
-            st.subheader("Camp vs Employee Admission Count")
-            st.dataframe(pivot_table)
+        # ------------------ CLEAN DATA ------------------
+        df = df[[name_col, camp_col, fees_col]].copy()
 
-            # Summaries
-            employee_summary = df.groupby(employee_col).size().reset_index(name="Admissions")
-            camp_summary = df.groupby(camp_col).size().reset_index(name="Admissions")
-            date_summary = df.groupby(date_col).size().reset_index(name="Admissions")
-            month_summary = df.groupby('Month').size().reset_index(name="Admissions")
+        df[fees_col] = pd.to_numeric(df[fees_col], errors='coerce').fillna(0)
+        df[name_col] = df[name_col].astype(str).str.strip()
+        df[camp_col] = df[camp_col].astype(str).str.strip()
 
-            fees_summary = df.groupby(employee_col, as_index=False)[fees_col].sum()
-            balance_summary = df.groupby(employee_col, as_index=False)[balance_col].sum()
+        df = df.dropna(subset=[name_col])
 
-            # Save Excel
-            output_file = "MCF_Admission_MIS_Report.xlsx"
+        # ------------------ CREATE ADMISSION FORMAT ------------------
+        pivot_df = pd.pivot_table(
+            df,
+            index=name_col,
+            columns=camp_col,
+            values=fees_col,
+            aggfunc='sum',
+            fill_value=0
+        )
 
-            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-                pivot_table.to_excel(writer, sheet_name='Camp vs Employee')
-                employee_summary.to_excel(writer, sheet_name='Employee Summary', index=False)
-                camp_summary.to_excel(writer, sheet_name='Camp Summary', index=False)
-                date_summary.to_excel(writer, sheet_name='Date Summary', index=False)
-                month_summary.to_excel(writer, sheet_name='Monthly Summary', index=False)
-                fees_summary.to_excel(writer, sheet_name='Fees Summary', index=False)
-                balance_summary.to_excel(writer, sheet_name='Balance Summary', index=False)
+        pivot_df = pivot_df.reset_index()
 
-            with open(output_file, "rb") as file:
-                st.download_button(
-                    label="Download MIS Excel Report",
-                    data=file,
-                    file_name="MCF_Admission_MIS_Report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+        # ------------------ ADD TOTAL COLUMN ------------------
+        numeric_cols = pivot_df.select_dtypes(include='number').columns
+        pivot_df["Total Fees"] = pivot_df[numeric_cols].sum(axis=1)
 
-            st.success("MIS Report Generated Successfully")
+        pivot_df.rename(columns={name_col: "Student Name"}, inplace=True)
+
+        st.subheader("📊 Admission Format Output")
+        st.dataframe(pivot_df)
+
+        # ------------------ CAMP SUMMARY ------------------
+        camp_summary = df.groupby(camp_col)[fees_col].sum().reset_index()
+        camp_summary.columns = ["Camp", "Total Fees"]
+
+        st.subheader("🏕️ Camp Summary")
+        st.dataframe(camp_summary)
+
+        # ------------------ DOWNLOAD EXCEL ------------------
+        def convert_to_excel(df1, df2):
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df1.to_excel(writer, index=False, sheet_name='Admission Format')
+                df2.to_excel(writer, index=False, sheet_name='Camp Summary')
+            return output.getvalue()
+
+        excel_file = convert_to_excel(pivot_df, camp_summary)
+
+        st.download_button(
+            label="📥 Download Admission Format Excel",
+            data=excel_file,
+            file_name="Admission_Format_Output.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     except Exception as e:
-        st.error("Error occurred while processing file")
-        st.write(e)
+        st.error("❌ Error occurred while processing file")
+        st.exception(e)
+
+else:
+    st.info("👆 Please upload an Excel file to start analysis.")
