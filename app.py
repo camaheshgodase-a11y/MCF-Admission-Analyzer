@@ -4,12 +4,14 @@ from io import BytesIO
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.chart import BarChart, Reference
 from openpyxl.drawing.image import Image
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="MCF Admission Auditor", layout="wide")
 
 st.title("📊 MCF Admission Analyzer + Audit System")
+st.caption("Created by CA Mahesh Godase")
 
 uploaded_file = st.file_uploader("📂 Upload Admission File", type=["xlsx"])
 
@@ -57,13 +59,6 @@ if uploaded_file is not None:
 
         df[camp_col] = df[camp_col].replace(camp_map)
 
-        # -------- AUDIT --------
-        st.subheader("🧾 Audit Report")
-
-        st.write("❗ Unknown Camps:", len(df[~df[camp_col].isin(camp_map.values())]))
-        st.write("❗ Blank Employees:", len(df[df[emp_col] == ""]))
-        st.write("📊 Input Rows:", len(df))
-
         # -------- PIVOT --------
         camp_order = list(set(camp_map.values()))
 
@@ -89,16 +84,11 @@ if uploaded_file is not None:
         # -------- AUTO WIDTH FIX --------
         def auto_width(ws):
             for col_cells in ws.iter_cols(min_row=1, max_row=ws.max_row):
-                max_length = 0
                 col_letter = get_column_letter(col_cells[0].column)
-
+                max_length = 0
                 for cell in col_cells:
-                    try:
-                        if cell.value:
-                            max_length = max(max_length, len(str(cell.value)))
-                    except:
-                        pass
-
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max_length + 3
 
         # -------- EXCEL FUNCTION --------
@@ -139,7 +129,6 @@ if uploaded_file is not None:
                     cell = ws.cell(row=r, column=c, value=val)
                     cell.border = border
                     cell.alignment = center
-
                     if str(row[0]).upper() == "TOTAL":
                         cell.font = bold_font
                         cell.fill = PatternFill(start_color="D9D9D9", fill_type="solid")
@@ -147,32 +136,99 @@ if uploaded_file is not None:
             ws.freeze_panes = "A5"
             auto_width(ws)
 
+            # ===== SHEET 2 DASHBOARD =====
+            ws2 = wb.create_sheet("Dashboard")
+
+            chart = BarChart()
+            data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=len(df)+3)
+            cats = Reference(ws, min_col=1, min_row=5, max_row=len(df)+2)
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(cats)
+            ws2.add_chart(chart, "A1")
+
+            # ===== SHEET 3 CAMP ANALYSIS =====
+            ws3 = wb.create_sheet("Camp Analysis")
+            ws3.append(["Camp", "Total", "%"])
+            total = df.iloc[-1]["Total"]
+
+            for col in df.columns[1:-1]:
+                val = df.iloc[-1][col]
+                ws3.append([col, val, round(val/total*100, 2)])
+            auto_width(ws3)
+
+            # ===== SHEET 4 TOP PERFORMERS =====
+            ws4 = wb.create_sheet("Top Performers")
+            temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
+            ws4.append(["Rank", "Employee", "Total"])
+            for i, row in enumerate(temp.values, 1):
+                ws4.append([i, row[0], row[-1]])
+            auto_width(ws4)
+
+            # ===== SHEET 5 AUDIT =====
+            ws5 = wb.create_sheet("Audit Summary")
+            ws5.append(["Metric", "Value"])
+            ws5.append(["Total Rows", len(raw_df)])
+            ws5.append(["Output Total", df.iloc[-1]["Total"]])
+            auto_width(ws5)
+
             # ===== SHEET 6 RAW DATA =====
             ws6 = wb.create_sheet("Raw Data (Input)")
-
             headers = list(raw_df.columns) + ["Data Status"]
             ws6.append(headers)
 
             for row in raw_df.values:
                 row_list = list(row)
-
                 status = "Incomplete" if any(pd.isna(x) or str(x).strip() == "" for x in row_list) else "Complete"
                 row_list.append(status)
-
                 ws6.append(row_list)
 
                 fill = PatternFill(start_color="FFC7CE" if status=="Incomplete" else "C6EFCE", fill_type="solid")
-
                 for cell in ws6[ws6.max_row]:
                     cell.fill = fill
 
             auto_width(ws6)
 
+            # ===== SHEET 7 FEES COLLECTION =====
+            ws7 = wb.create_sheet("Fees Collection")
+
+            fee_col = None
+            for col in raw_df.columns:
+                if "fee" in col.lower() or "amount" in col.lower():
+                    fee_col = col
+
+            if fee_col:
+                temp_fee = raw_df.copy()
+                temp_fee[fee_col] = pd.to_numeric(temp_fee[fee_col], errors="coerce").fillna(0)
+                summary = temp_fee.groupby(emp_col)[fee_col].sum().reset_index()
+
+                ws7.append(["Employee", "Total Fees"])
+                for row in summary.values:
+                    ws7.append(row)
+            else:
+                ws7.append(["No Fees Column Found"])
+
+            auto_width(ws7)
+
+            # ===== SHEET 8 FEES ANALYSIS =====
+            ws8 = wb.create_sheet("Fees Analysis")
+
+            if fee_col:
+                summary = temp_fee.groupby(camp_col)[fee_col].sum().reset_index()
+                total_fee = summary[fee_col].sum()
+
+                ws8.append(["Camp", "Fees", "%"])
+                for row in summary.values:
+                    percent = (row[1]/total_fee*100) if total_fee else 0
+                    ws8.append([row[0], row[1], round(percent, 2)])
+            else:
+                ws8.append(["No Fees Column Found"])
+
+            auto_width(ws8)
+
             output = BytesIO()
             wb.save(output)
             return output.getvalue()
 
-        # -------- DOWNLOAD --------
         st.download_button(
             "📥 Download Final MIS Excel",
             data=to_excel(final_df, df_raw),
