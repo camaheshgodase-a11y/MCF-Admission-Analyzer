@@ -5,7 +5,6 @@ from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.chart import BarChart, Reference, PieChart
-from openpyxl.drawing.image import Image
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="MCF Admission Auditor", layout="wide")
@@ -46,7 +45,6 @@ if uploaded_file is not None:
 
         # -------- PIVOT --------
         pivot = pd.pivot_table(df, index=emp_col, columns=camp_col, aggfunc="size", fill_value=0)
-
         pivot = pivot.reset_index()
         pivot.rename(columns={emp_col: "Employee Name"}, inplace=True)
 
@@ -63,41 +61,89 @@ if uploaded_file is not None:
         # -------- AUTO WIDTH --------
         def auto_width(ws):
             for col_cells in ws.iter_cols():
-                length = max(len(str(cell.value)) if cell.value else 0 for cell in col_cells)
-                ws.column_dimensions[get_column_letter(col_cells[0].column)].width = length + 3
+                max_len = max((len(str(c.value)) for c in col_cells if c.value), default=0)
+                ws.column_dimensions[get_column_letter(col_cells[0].column)].width = max_len + 3
 
         # -------- EXCEL FUNCTION --------
         def to_excel(df, raw_df):
-
             wb = Workbook()
+
+            header_fill = PatternFill(start_color="1F4E78", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+            title_font = Font(size=16, bold=True)
+            bold_font = Font(bold=True)
+
+            thin = Border(
+                left=Side(style="thin"), right=Side(style="thin"),
+                top=Side(style="thin"), bottom=Side(style="thin")
+            )
+
+            center = Alignment(horizontal="center", vertical="center")
 
             # ===== MAIN REPORT =====
             ws = wb.active
             ws.title = "Admission Report"
 
-            ws.append(list(df.columns))
-            for row in df.values:
-                ws.append(list(row))
+            ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=len(df.columns))
+            ws.cell(1, 1).value = "MCF Admission MIS Report"
+            ws.cell(1, 1).font = title_font
+            ws.cell(1, 1).alignment = center
 
+            start_row = 4
+
+            # Header
+            for col_num, col_name in enumerate(df.columns, 1):
+                cell = ws.cell(row=start_row, column=col_num, value=col_name)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = center
+                cell.border = thin
+
+            # Data
+            for r, row in enumerate(df.values, start_row + 1):
+                ws.append(list(row))
+                for c in range(1, len(df.columns)+1):
+                    ws.cell(row=r, column=c).border = thin
+                    ws.cell(row=r, column=c).alignment = center
+
+            # Highlight total row
+            for c in range(1, len(df.columns)+1):
+                cell = ws.cell(row=ws.max_row, column=c)
+                cell.font = bold_font
+                cell.fill = PatternFill(start_color="D9E1F2", fill_type="solid")
+
+            ws.freeze_panes = "A5"
             auto_width(ws)
 
             # ===== DASHBOARD =====
             ws2 = wb.create_sheet("Dashboard")
 
+            total_adm = df.iloc[-1]["Total"]
+            top_emp = df.iloc[:-1].sort_values(by="Total", ascending=False).iloc[0]["Employee Name"]
+
+            ws2["A1"] = "KPI Dashboard"
+            ws2["A1"].font = title_font
+
+            ws2.append(["Metric", "Value"])
+            ws2.append(["Total Admissions", total_adm])
+            ws2.append(["Top Performer", top_emp])
+
             chart = BarChart()
             chart.title = "Employee-wise Admissions"
 
-            data = Reference(ws, min_col=len(df.columns), min_row=1, max_row=len(df))
-            cats = Reference(ws, min_col=1, min_row=2, max_row=len(df))
+            data = Reference(ws, min_col=len(df.columns), min_row=4, max_row=ws.max_row)
+            cats = Reference(ws, min_col=1, min_row=5, max_row=ws.max_row-1)
 
             chart.add_data(data, titles_from_data=True)
             chart.set_categories(cats)
 
-            ws2.add_chart(chart, "A1")
+            ws2.add_chart(chart, "E2")
+
+            auto_width(ws2)
 
             # ===== CAMP ANALYSIS =====
             ws3 = wb.create_sheet("Camp Analysis")
-            ws3.append(["Camp", "Total", "%"])
+            ws3.append(["Camp", "Total", "% Contribution"])
 
             total = df.iloc[-1]["Total"]
 
@@ -106,12 +152,16 @@ if uploaded_file is not None:
                 percent = (val/total) if total else 0
                 ws3.append([col, val, percent])
 
+            for row in ws3.iter_rows(min_row=2, min_col=3, max_col=3):
+                for cell in row:
+                    cell.number_format = "0.00%"
+
             auto_width(ws3)
 
             # ===== TOP PERFORMERS =====
             ws4 = wb.create_sheet("Top Performers")
-
             temp = df.iloc[:-1].sort_values(by="Total", ascending=False)
+
             ws4.append(["Rank", "Employee", "Total"])
 
             for i, row in enumerate(temp.values, 1):
@@ -203,11 +253,10 @@ if uploaded_file is not None:
             wb.save(output)
             return output.getvalue()
 
-        # -------- DOWNLOAD --------
         st.download_button(
-            "📥 Download Advanced MIS Excel",
+            "📥 Download Premium MIS Excel",
             data=to_excel(final_df, df_raw),
-            file_name="MCF_Advanced_MIS.xlsx",
+            file_name="MCF_Premium_MIS.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
