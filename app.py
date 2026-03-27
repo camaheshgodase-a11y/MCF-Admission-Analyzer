@@ -1,77 +1,94 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="MCF Admission Analyzer", layout="wide")
+st.set_page_config(page_title="MCF Admission MIS", layout="wide")
 
-st.title("📊 MCF Admission Analyzer")
-st.write("Upload your Admission Template Excel file to generate analysis.")
+st.title("MCF Admission MIS Analyzer")
 
-# File Upload
-uploaded_file = st.file_uploader("📂 Upload Excel File", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload Admission Excel File", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
         # Read Excel
-        df = pd.read_excel(uploaded_file, header=1)
+        df = pd.read_excel(uploaded_file)
 
-        st.subheader("🔍 Raw Data Preview")
-        st.dataframe(df)
+        st.subheader("Preview Data")
+        st.dataframe(df.head())
 
-        # ---- CLEAN DATA ----
+        # Remove blank rows
         df = df.dropna(how='all')
 
-        # Rename columns (adjust based on your file)
-        df.columns = df.columns.str.strip()
+        # Clean column names
+        df.columns = df.columns.astype(str).str.strip()
 
-        # Example important columns (EDIT if needed)
-        # You must match these with your actual Excel columns
-        name_col = "Employee Name"
-        camp_col = "Camp Type"
-        fees_col = "Fees"
+        st.subheader("Select Required Columns")
 
-        # If columns not matching, auto detect (basic fallback)
-        if name_col not in df.columns:
-            name_col = df.columns[2]
-        if camp_col not in df.columns:
-            camp_col = df.columns[5]
-        if fees_col not in df.columns:
-            fees_col = df.columns[-1]
+        employee_col = st.selectbox("Employee Name Column", df.columns)
+        camp_col = st.selectbox("Camp Name Column", df.columns)
+        date_col = st.selectbox("Admission Date Column", df.columns)
+        fees_col = st.selectbox("Fees Column", df.columns)
+        balance_col = st.selectbox("Balance Column", df.columns)
 
-        # Convert fees to numeric
-        df[fees_col] = pd.to_numeric(df[fees_col], errors='coerce')
+        if st.button("Generate MIS Report"):
 
-        # ---- ANALYSIS ----
-        summary = df.groupby(name_col)[fees_col].sum().reset_index()
+            # Clean text fields
+            df[employee_col] = df[employee_col].astype(str).str.strip()
+            df[camp_col] = df[camp_col].astype(str).str.strip()
 
-        summary.columns = ["Employee Name", "Total Fees"]
+            # Convert Date
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+            df = df[df[date_col].notna()]
 
-        st.subheader("📊 Admission Summary")
-        st.dataframe(summary)
+            # Convert numeric
+            df[fees_col] = pd.to_numeric(df[fees_col], errors='coerce').fillna(0)
+            df[balance_col] = pd.to_numeric(df[balance_col], errors='coerce').fillna(0)
 
-        # ---- CAMP WISE ANALYSIS ----
-        camp_summary = df.groupby(camp_col)[fees_col].sum().reset_index()
-        camp_summary.columns = ["Camp Type", "Total Fees"]
+            # Month column
+            df['Month'] = df[date_col].dt.strftime('%Y-%m')
 
-        st.subheader("🏕️ Camp-wise Summary")
-        st.dataframe(camp_summary)
+            # Pivot table
+            pivot_table = pd.pivot_table(
+                df,
+                index=camp_col,
+                columns=employee_col,
+                aggfunc='size',
+                fill_value=0
+            )
 
-        # ---- DOWNLOAD ----
-        def convert_to_excel(df1, df2):
-            from io import BytesIO
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df1.to_excel(writer, index=False, sheet_name='Employee Summary')
-                df2.to_excel(writer, index=False, sheet_name='Camp Summary')
-            return output.getvalue()
+            st.subheader("Camp vs Employee Admission Count")
+            st.dataframe(pivot_table)
 
-        excel_data = convert_to_excel(summary, camp_summary)
+            # Summaries
+            employee_summary = df.groupby(employee_col).size().reset_index(name="Admissions")
+            camp_summary = df.groupby(camp_col).size().reset_index(name="Admissions")
+            date_summary = df.groupby(date_col).size().reset_index(name="Admissions")
+            month_summary = df.groupby('Month').size().reset_index(name="Admissions")
 
-        st.download_button(
-            label="📥 Download Report",
-            data=excel_data,
-            file_name="MCF_Admission_Report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            fees_summary = df.groupby(employee_col, as_index=False)[fees_col].sum()
+            balance_summary = df.groupby(employee_col, as_index=False)[balance_col].sum()
+
+            # Save Excel
+            output_file = "MCF_Admission_MIS_Report.xlsx"
+
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                pivot_table.to_excel(writer, sheet_name='Camp vs Employee')
+                employee_summary.to_excel(writer, sheet_name='Employee Summary', index=False)
+                camp_summary.to_excel(writer, sheet_name='Camp Summary', index=False)
+                date_summary.to_excel(writer, sheet_name='Date Summary', index=False)
+                month_summary.to_excel(writer, sheet_name='Monthly Summary', index=False)
+                fees_summary.to_excel(writer, sheet_name='Fees Summary', index=False)
+                balance_summary.to_excel(writer, sheet_name='Balance Summary', index=False)
+
+            with open(output_file, "rb") as file:
+                st.download_button(
+                    label="Download MIS Excel Report",
+                    data=file,
+                    file_name="MCF_Admission_MIS_Report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+            st.success("MIS Report Generated Successfully")
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error("Error occurred while processing file")
+        st.write(e)
